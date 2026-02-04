@@ -1,6 +1,8 @@
 import { v2 as cloudinary } from "cloudinary";
-import { unlink } from "fs";
+import { unlink, createReadStream, createWriteStream } from "fs";
 import { exec } from "child_process";
+import { createGzip } from "zlib";
+import { pipeline } from "stream/promises";
 import env from "./config";
 
 cloudinary.config({
@@ -40,7 +42,7 @@ const dumpToFile = async (path: string) => {
 };
 
 const deleteFile = async (path: string) => {
-  console.log("Deleting file...");
+  console.log(`Deleting file: ${path}`);
   await new Promise((resolve, reject) => {
     unlink(path, (err) => {
       if (err) {
@@ -52,6 +54,18 @@ const deleteFile = async (path: string) => {
   });
 };
 
+const compressFile = async (inputPath: string, outputPath: string) => {
+  console.log("Compressing backup with gzip...");
+
+  const source = createReadStream(inputPath);
+  const destination = createWriteStream(outputPath);
+  const gzip = createGzip({ level: 9 }); // Maximum compression
+
+  await pipeline(source, gzip, destination);
+
+  console.log("Backup compressed successfully...");
+};
+
 
 
 export const backup = async () => {
@@ -60,12 +74,16 @@ export const backup = async () => {
   let date = new Date().toISOString();
   const timestamp = date.replace(/[:.]+/g, "-");
   const filename = `backup-${timestamp}.sql`;
+  const compressedFilename = `${filename}.gz`;
   const filepath = `/tmp/${filename}`;
+  const compressedFilepath = `/tmp/${compressedFilename}`;
 
   try {
     await dumpToFile(filepath);
-    await uploadToCloudinary({ name: filename, path: filepath });
+    await compressFile(filepath, compressedFilepath);
+    await uploadToCloudinary({ name: compressedFilename, path: compressedFilepath });
     await deleteFile(filepath);
+    await deleteFile(compressedFilepath);
   } catch (error) {
     console.log('An error ocurred!', error);
   }
